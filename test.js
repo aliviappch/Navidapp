@@ -35,6 +35,7 @@ test('flujo completo y privacidad', async () => {
     const html = await (await fetch(`${base}/p/${p.token}`)).text();
     const g = ps.find((x) => x.id === p.giftee_id);
     assert.ok(html.includes(`deseo de ${g.email}`));
+    assert.ok(html.includes(`${g.email[0]} (${g.email})`)); // nombre y correo de a quien le tocó
     assert.ok(!ps.filter((x) => x.id !== g.id).some((x) => html.includes(`deseo de ${x.email}`) && x.id !== p.id));
   }
   server.close();

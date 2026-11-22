@@ -28,7 +28,7 @@ export function createApp(dbPromise = openDb(), baseUrl = process.env.BASE_URL
     partById: (id) => get('SELECT * FROM participants WHERE id = ?', [id]),
   };
   const wrap = (fn) => (req, res, next) => fn(req, res).catch(next);
-  const label = (p) => p.name || p.email;
+  const label = (p) => (p.name ? `${p.name} (${p.email})` : p.email);
   const parseEmails = (raw) =>
     [...new Set(String(raw).split(/[\s,;]+/).map((e) => e.trim().toLowerCase()).filter(Boolean))];
   const notFound = (res) => res.status(404).send(page('No encontrado', '<h1>Enlace no válido</h1>'));
@@ -155,7 +155,8 @@ export function createApp(dbPromise = openDb(), baseUrl = process.env.BASE_URL
     return page(ev.name, `<h1>🎄 ${esc(ev.name)}</h1>${flash && `<p class="msg">${esc(flash)}</p>`}
       ${giftee}
       <form class="card" method="post" action="/p/${p.token}">
-        <label>Tu nombre</label><input name="name" maxlength="60" value="${esc(p.name)}" placeholder="${esc(p.email)}">
+        <label>Tu nombre</label><input name="name" maxlength="60" required value="${esc(p.name)}" placeholder="Cómo te conoce la familia">
+        <label>Tu correo</label><input type="email" value="${esc(p.email)}" readonly>
         <label>Tus ideas de regalo</label>
         <textarea name="wishes" maxlength="2000" placeholder="Libros, un buzo talla M, chocolates...">${esc(p.wishes)}</textarea>
         <p class="muted">Solo la persona que te toque podrá leer esto.</p>
@@ -170,8 +171,10 @@ export function createApp(dbPromise = openDb(), baseUrl = process.env.BASE_URL
   app.post('/p/:t', wrap(async (req, res) => {
     const p = await q.partByToken(req.params.t);
     if (!p) return notFound(res);
+    const name = String(req.body.name || '').trim().slice(0, 60);
+    if (!name) return res.status(400).send(await partView(p, 'Escribe tu nombre para poder guardar.'));
     await run('UPDATE participants SET name = ?, wishes = ? WHERE id = ?',
-      [String(req.body.name || '').trim().slice(0, 60), String(req.body.wishes || '').slice(0, 2000), p.id]);
+      [name, String(req.body.wishes || '').slice(0, 2000), p.id]);
     res.send(await partView(await q.partByToken(p.token), '¡Guardado! 🎁'));
   }));
 
