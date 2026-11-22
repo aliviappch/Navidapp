@@ -21,12 +21,15 @@ test('flujo completo y privacidad', async () => {
   const post = (u, o) => fetch(base + u, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(o) });
   const r = await post('/events', { name: 'T', organizer: 'a@a.com', emails: 'a@a.com b@a.com c@a.com' });
   const admin = r.headers.get('location');
-  const ps = (await db.execute('SELECT * FROM participants')).rows;
+  const ps = (await db.query('SELECT * FROM participants')).rows;
   for (const p of ps) await post(`/p/${p.token}`, { name: p.email[0], wishes: `deseo de ${p.email}` });
   await post(`${admin}/draw`, {});
+  const before = JSON.stringify((await db.query('SELECT id, giftee_id FROM participants ORDER BY id')).rows);
+  await Promise.all([post(`${admin}/draw`, {}), post(`${admin}/draw`, {})]); // doble clic
+  assert.equal(JSON.stringify((await db.query('SELECT id, giftee_id FROM participants ORDER BY id')).rows), before);
   const adminHtml = await (await fetch(base + admin)).text();
   assert.ok(!/Te tocó/.test(adminHtml) && !ps.some((p) => adminHtml.includes('deseo de')));
-  for (const p of (await db.execute('SELECT * FROM participants')).rows) {
+  for (const p of (await db.query('SELECT * FROM participants')).rows) {
     const html = await (await fetch(`${base}/p/${p.token}`)).text();
     const g = ps.find((x) => x.id === p.giftee_id);
     assert.ok(html.includes(`deseo de ${g.email}`));

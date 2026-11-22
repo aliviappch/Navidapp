@@ -4,16 +4,28 @@
 2. Cada uno escribe sus ideas de regalo en su enlace.
 3. El organizador sortea. Cada persona ve **solo** a quién le tocó y sus ideas. Nadie más (ni el organizador) ve las asignaciones.
 
-## Uso
+## Local
     npm install
-    npm start            # http://localhost:3000
+    npm start        # http://localhost:3000
     npm test
 
-Variables: `SMTP_URL` (ej. `smtps://user:pass@smtp.gmail.com`), `MAIL_FROM`, `BASE_URL` (URL pública), `PORT`, `DB_FILE`.
-Sin `SMTP_URL`, los correos se imprimen en consola (modo desarrollo).
+Sin `DATABASE_URL` usa un Postgres embebido (carpeta `.pgdata`), y sin `SMTP_URL` los correos se imprimen en consola.
 
-## Publicar en Vercel
-1. Base de datos: crea una en [Turso](https://turso.tech) (gratis) y obtén `TURSO_DATABASE_URL` y `TURSO_AUTH_TOKEN`.
-2. Correo: una cuenta Gmail con "contraseña de aplicación" → `SMTP_URL=smtps://tucorreo%40gmail.com:CLAVE@smtp.gmail.com:465`, `MAIL_FROM`.
-3. Importa este repo en vercel.com (o `npx vercel`), y define esas variables en Settings → Environment Variables.
-   `BASE_URL` es opcional (por defecto usa el dominio de producción de Vercel).
+## Publicar: Vercel + Supabase
+
+### 1. Supabase (base de datos)
+1. En supabase.com crea un proyecto y guarda la contraseña de la base de datos.
+2. Botón **Connect** → *Transaction pooler* → copia la cadena (puerto **6543**) y reemplaza `[YOUR-PASSWORD]`. Esa es tu `DATABASE_URL`.
+   Usa el pooler (no la conexión directa): Vercel abre muchas conexiones cortas.
+3. No hace falta crear tablas: la app las crea al iniciar. (Alternativa: pega `supabase/schema.sql` en *SQL Editor*.)
+   El esquema activa RLS sin políticas, así la API pública de Supabase (clave `anon`) no puede leer los datos.
+
+### 2. Correo
+Gmail → activa verificación en dos pasos → crea una "contraseña de aplicación" y arma `SMTP_URL` (ver `.env.example`).
+
+### 3. Vercel
+1. vercel.com → *Add New → Project* → importa este repo (elige la rama con el código).
+2. En *Environment Variables* define `DATABASE_URL`, `SMTP_URL` y `MAIL_FROM`.
+3. *Deploy*. Prueba con 3 correos tuyos antes de invitar a la familia.
+
+Variables: `DATABASE_URL`, `SMTP_URL`, `MAIL_FROM`, `BASE_URL` (opcional), `PORT`, `PG_POOL_MAX` (por defecto 3).

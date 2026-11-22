@@ -16,9 +16,9 @@ export function createApp(dbPromise = openDb(), baseUrl = process.env.BASE_URL
   Promise.resolve(dbPromise).catch(() => {}); // el error se reporta en la primera petición
   app.use(express.urlencoded({ extended: false, limit: '50kb' }));
   let db;
-  const get = async (sql, args = []) => (await db.execute({ sql, args })).rows[0];
-  const list = async (sql, args = []) => (await db.execute({ sql, args })).rows;
-  const run = (sql, args = []) => db.execute({ sql, args });
+  const get = async (sql, args = []) => (await db.query(sql, args)).rows[0];
+  const list = async (sql, args = []) => (await db.query(sql, args)).rows;
+  const run = (sql, args = []) => db.query(sql, args);
   app.use(async (_req, _res, next) => { try { db ??= await dbPromise; next(); } catch (e) { next(e); } });
 
   const q = {
@@ -62,10 +62,11 @@ export function createApp(dbPromise = openDb(), baseUrl = process.env.BASE_URL
       return res.status(400).send(page('Error', `<h1>Deben ser entre 3 y ${MAX} participantes</h1>`));
 
     const adminToken = token();
-    const { lastInsertRowid } = await run('INSERT INTO events (name, admin_token) VALUES (?, ?)', [name, adminToken]);
-    const eventId = Number(lastInsertRowid);
-    await db.batch(emails.map((e) => ({ sql: 'INSERT INTO participants (event_id, email, token) VALUES (?, ?, ?)', args: [eventId, e, token()] })));
-    const event = await q.eventById(eventId);
+    const event = await db.tx(async (t) => {
+      const ev = (await t.query('INSERT INTO events (name, admin_token) VALUES (?, ?) RETURNING *', [name, adminToken])).rows[0];
+      for (const e of emails) await t.query('INSERT INTO participants (event_id, email, token) VALUES (?, ?, ?)', [ev.id, e, token()]);
+      return ev;
+    });
     await Promise.allSettled((await q.parts(event.id)).map((p) => invite(event, p)));
     await sendMail(organizer, `Administra tu amigo secreto: ${name}`,
       `Panel de administración (guárdalo, no lo compartas):\n${baseUrl}/admin/${adminToken}\n`);
@@ -124,11 +125,14 @@ export function createApp(dbPromise = openDb(), baseUrl = process.env.BASE_URL
     const ps = await q.parts(ev.id);
     if (ev.drawn || ps.length < 3) return res.status(409).send(await adminView(ev, 'No se puede sortear.'));
     const pairs = draw(ps.map((p) => p.id));
-    // Todo en una transacción; "drawn = 0" evita sortear dos veces si hay doble clic.
-    await db.batch([
-      ...pairs.map(([giver, giftee]) => ({ sql: 'UPDATE participants SET giftee_id = ? WHERE id = ?', args: [giftee, giver] })),
-      { sql: 'UPDATE events SET drawn = 1 WHERE id = ? AND drawn = 0', args: [ev.id] },
-    ], 'write');
+    // Transacción; "drawn = 0" evita sortear dos veces (doble clic o dos pestañas).
+    const done = await db.tx(async (t) => {
+      const r = await t.query('UPDATE events SET drawn = 1 WHERE id = ? AND drawn = 0', [ev.id]);
+      if (r.rowCount !== 1) return false;
+      for (const [giver, giftee] of pairs) await t.query('UPDATE participants SET giftee_id = ? WHERE id = ?', [giftee, giver]);
+      return true;
+    });
+    if (!done) return res.redirect(`/admin/${ev.admin_token}`);
     await Promise.allSettled(ps.map((p) => sendMail(p.email, `🎁 ¡Ya salió el sorteo! ${ev.name}`,
       `Entra a tu enlace personal para ver a quién le toca regalar y sus ideas:\n${baseUrl}/p/${p.token}\n`)));
     res.redirect(`/admin/${ev.admin_token}`);
