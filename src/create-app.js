@@ -11,8 +11,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export function createApp(dbPromise = openDb(), baseUrl = process.env.BASE_URL
   || (process.env.VERCEL_PROJECT_PRODUCTION_URL && `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`)
-  || 'http://localhost:3000') {
-  const app = express();
+  || 'http://localhost:3000', app = express()) {
   Promise.resolve(dbPromise).catch(() => {}); // el error se reporta en la primera petición
   app.use(express.urlencoded({ extended: false, limit: '50kb' }));
   let db;
