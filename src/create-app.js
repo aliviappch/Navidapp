@@ -75,6 +75,11 @@ export function createApp(dbPromise = openDb(), baseUrl = process.env.BASE_URL
   // ---- Organizador: ve quién ya respondió, pero NUNCA las asignaciones ----
   const adminView = async (event, flash = '') => {
     const ps = await q.parts(event.id);
+    const done = ps.filter((p) => p.wishes.trim()).length;
+    const pending = ps.length - done;
+    const progress = `<div class="card"><strong>${done} de ${ps.length} ya escribieron sus ideas</strong>
+      <progress value="${done}" max="${ps.length || 1}" style="width:100%"></progress>
+      ${event.drawn ? '' : pending ? `<p class="muted">Faltan ${pending}. Puedes esperar a que todos terminen antes de sortear.</p>` : '<p class="ok">✔ Todos completaron. Ya puedes sortear.</p>'}</div>`;
     const rows = ps.map((p) => `<li><span>${esc(label(p))}</span>
       <span>${p.wishes.trim() ? '<span class="ok">✔ ya escribió</span>' : '<span class="muted">pendiente</span>'}
       ${event.drawn ? '' : `<form method="post" action="/admin/${event.admin_token}/remove" style="display:inline"><input type="hidden" name="id" value="${p.id}"><button class="link">quitar</button></form>`}</span></li>`).join('');
@@ -84,11 +89,11 @@ export function createApp(dbPromise = openDb(), baseUrl = process.env.BASE_URL
     const act = event.drawn
       ? '<p class="msg">✅ El sorteo ya se hizo. Nadie (ni tú) puede ver quién le tocó a quién.</p>'
       : `<form class="card" method="post" action="/admin/${event.admin_token}/draw"
-           onsubmit="return confirm('¿Hacer el sorteo? Ya no se podrán agregar ni quitar personas.')">
+           onsubmit="return confirm('${pending ? `Todavía faltan ${pending} por escribir sus ideas. ` : ''}¿Hacer el sorteo? Ya no se podrán agregar ni quitar personas.')">
            <p>Cuando todos hayan puesto sus ideas, haz el sorteo. Se avisará a cada uno por correo.</p>
            <button class="danger" ${ps.length < 3 ? 'disabled' : ''}>🎲 Sortear</button></form>`;
     return page(event.name, `<h1>🎁 ${esc(event.name)}</h1>${flash && `<p class="msg">${esc(flash)}</p>`}
-      <div class="card"><ul>${rows}</ul></div>${add}${act}`);
+      ${progress}<div class="card"><ul>${rows}</ul></div>${add}${act}`);
   };
 
   app.get('/admin/:t', wrap(async (req, res) => {

@@ -22,7 +22,9 @@ test('flujo completo y privacidad', async () => {
   const r = await post('/events', { name: 'T', organizer: 'a@a.com', emails: 'a@a.com b@a.com c@a.com' });
   const admin = r.headers.get('location');
   const ps = (await db.query('SELECT * FROM participants')).rows;
+  assert.ok((await (await fetch(base + admin)).text()).includes('0 de 3 ya escribieron'));
   for (const p of ps) await post(`/p/${p.token}`, { name: p.email[0], wishes: `deseo de ${p.email}` });
+  assert.ok((await (await fetch(base + admin)).text()).includes('3 de 3 ya escribieron'));
   await post(`${admin}/draw`, {});
   const before = JSON.stringify((await db.query('SELECT id, giftee_id FROM participants ORDER BY id')).rows);
   await Promise.all([post(`${admin}/draw`, {}), post(`${admin}/draw`, {})]); // doble clic
