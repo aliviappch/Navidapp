@@ -17,7 +17,7 @@ export const page = (title, body) => `<!doctype html>
   textarea{min-height:120px}
   button{background:var(--green);color:#fff;border:0;border-radius:8px;padding:12px 18px;font:inherit;font-weight:600;margin-top:14px;cursor:pointer}
   button.danger{background:var(--red)} button.link{background:none;color:var(--red);padding:0;margin:0;text-decoration:underline}
-  .ok{color:var(--green)} .muted{color:#7a6f6f} .msg{background:#e7f4ec;padding:10px 14px;border-radius:8px}
+  .err{background:#fde8e8;padding:10px 14px;border-radius:8px} .ok{color:var(--green)} .muted{color:#7a6f6f} .msg{background:#e7f4ec;padding:10px 14px;border-radius:8px}
   .gift{white-space:pre-wrap;background:#fff7e0;border-left:4px solid #e0a800;padding:10px 14px;border-radius:6px}
   ul{padding-left:0;list-style:none} li{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid #eee}
 </style></head><body><main>${body}</main></body></html>`;

@@ -2,4 +2,4 @@
 import express from 'express';
 import { createApp } from './create-app.js';
 
-export default createApp(undefined, undefined, express());
+export default createApp(undefined, express());

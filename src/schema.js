@@ -1,22 +1,29 @@
-// Mismo contenido que supabase/schema.sql (copia para pegar en el SQL Editor si se quiere).
+// Mismo contenido que supabase/schema.sql (un test lo comprueba).
 // Va como código para que Vercel lo incluya siempre en la función.
 export const schema = `
-CREATE TABLE IF NOT EXISTS events (
+CREATE TABLE IF NOT EXISTS secret_groups (
   id SERIAL PRIMARY KEY,
   name TEXT NOT NULL,
-  admin_token TEXT NOT NULL UNIQUE,
+  code TEXT NOT NULL UNIQUE,
   drawn INTEGER NOT NULL DEFAULT 0
 );
-CREATE TABLE IF NOT EXISTS participants (
+CREATE TABLE IF NOT EXISTS members (
   id SERIAL PRIMARY KEY,
-  event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-  email TEXT NOT NULL,
-  name TEXT NOT NULL DEFAULT '',
-  token TEXT NOT NULL UNIQUE,
+  group_id INTEGER NOT NULL REFERENCES secret_groups(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  name_key TEXT NOT NULL,
+  pass_hash TEXT NOT NULL,
   wishes TEXT NOT NULL DEFAULT '',
-  giftee_id INTEGER REFERENCES participants(id),
-  UNIQUE (event_id, email)
+  is_admin INTEGER NOT NULL DEFAULT 0,
+  giftee_id INTEGER REFERENCES members(id) ON DELETE SET NULL,
+  UNIQUE (group_id, name_key)
 );
-ALTER TABLE events ENABLE ROW LEVEL SECURITY;
-ALTER TABLE participants ENABLE ROW LEVEL SECURITY;
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,
+  member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE secret_groups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sessions ENABLE ROW LEVEL SECURITY;
 `;
