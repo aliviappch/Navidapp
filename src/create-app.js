@@ -63,6 +63,11 @@ export function createApp(dbPromise = openDb(), app = express()) {
   // ---------- inicio y grupo ----------
   const homeView = (flash = '') => page('Amigo Secreto', `
     <h1>🎄 Amigo Secreto</h1>${flash && `<p class="err">${esc(flash)}</p>`}
+    <form class="card" method="post" action="/login">
+      <h2>Entrar</h2>
+      <label>Tu nombre</label><input name="name" required maxlength="40" autocomplete="username">
+      <label>Tu contraseña</label><input name="password" type="password" required autocomplete="current-password">
+      <button>Entrar</button></form>
     <form class="card" method="post" action="/groups">
       <h2>Crear un grupo nuevo</h2>
       <label>Nombre del grupo</label><input name="group" required maxlength="60" value="Navidad en familia">
@@ -83,6 +88,18 @@ export function createApp(dbPromise = openDb(), app = express()) {
     const code = String(req.query.code || '').split('/g/').pop().replace(/[^a-z0-9]/gi, '').toLowerCase();
     res.redirect(code ? `/g/${code}` : '/');
   });
+
+  // Entrar desde la página principal: si el nombre existe en varios grupos, se usa el más reciente
+  // donde la contraseña coincida.
+  app.post('/login', wrap(async (req, res) => {
+    const pw = String(req.body.password || '');
+    const rows = await list('SELECT * FROM members WHERE name_key = ? ORDER BY group_id DESC', [nameKey(cleanName(req.body.name))]);
+    let found = null;
+    for (const m of rows) if (await checkPassword(pw, m.pass_hash)) { found = m; break; }
+    if (!found) return res.status(401).send(homeView('Nombre o contraseña incorrectos.'));
+    await startSession(req, res, found.id);
+    res.redirect('/me');
+  }));
 
   app.post('/groups', wrap(async (req, res) => {
     const group = String(req.body.group || '').trim().slice(0, 60);

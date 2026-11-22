@@ -59,6 +59,10 @@ test('cuentas, sorteo y privacidad', async () => {
   assert.equal((await req('POST', `/g/${code}/login`, intruso, { name: 'beto', password: 'mala' })).status, 401);
   assert.equal((await req('POST', `/g/${code}/login`, {}, { name: 'beto', password: 'clave2' })).loc, '/me');
 
+  // Entrar desde la página principal (sin el link del grupo)
+  assert.equal((await req('POST', '/login', {}, { name: 'Beto', password: 'clave2' })).loc, '/me');
+  assert.equal((await req('POST', '/login', {}, { name: 'Beto', password: 'mala' })).status, 401);
+
   // Contador de quién escribió
   assert.ok((await req('GET', '/me', ana)).html.includes('0 de 3 ya escribieron'));
   const users = { Ana: ana, Beto: beto, Cata: cata };
