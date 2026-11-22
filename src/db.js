@@ -1,6 +1,4 @@
-import { readFileSync } from 'node:fs';
-
-const schema = readFileSync(new URL('../supabase/schema.sql', import.meta.url), 'utf8');
+import { schema } from './schema.js';
 const numbered = (sql) => { let n = 0; return sql.replace(/\?/g, () => `$${++n}`); }; // ? → $1, $2…
 
 // Interfaz común: query(sql, args) → { rows, rowCount }; tx(fn) → fn recibe { query }.
@@ -39,6 +37,7 @@ export async function openDb(url = process.env.DATABASE_URL) {
     };
   }
 
+  if (process.env.VERCEL) throw new Error('Falta la variable DATABASE_URL en Vercel (Settings → Environment Variables)');
   const { PGlite } = await import('@electric-sql/pglite');
   const lite = new PGlite(url === ':memory:' ? undefined : process.env.PGLITE_DIR || '.pgdata');
   const wrap = (c) => ({
