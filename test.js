@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { draw } from './src/draw.js';
 import { openDb } from './src/db.js';
-import { createApp } from './src/app.js';
+import { createApp } from './src/create-app.js';
 
 test('sorteo: sin auto-asignación, todos reciben una vez', () => {
   for (let n = 3; n <= 20; n++) for (let r = 0; r < 200; r++) {

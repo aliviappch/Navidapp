@@ -1,4 +1,4 @@
-import { createApp } from './app.js';
+import { createApp } from './create-app.js';
 
 const app = createApp();
 // En Vercel el servidor se detecta solo (export default); en local escucha en un puerto.
