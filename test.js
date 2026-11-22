@@ -15,18 +15,18 @@ test('sorteo: sin auto-asignación, todos reciben una vez', () => {
 });
 
 test('flujo completo y privacidad', async () => {
-  const db = openDb(':memory:');
+  const db = await openDb(':memory:');
   const server = createApp(db, 'http://x').listen(0);
   const base = `http://localhost:${server.address().port}`;
   const post = (u, o) => fetch(base + u, { method: 'POST', redirect: 'manual', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(o) });
   const r = await post('/events', { name: 'T', organizer: 'a@a.com', emails: 'a@a.com b@a.com c@a.com' });
   const admin = r.headers.get('location');
-  const ps = db.prepare('SELECT * FROM participants').all();
+  const ps = (await db.execute('SELECT * FROM participants')).rows;
   for (const p of ps) await post(`/p/${p.token}`, { name: p.email[0], wishes: `deseo de ${p.email}` });
   await post(`${admin}/draw`, {});
   const adminHtml = await (await fetch(base + admin)).text();
   assert.ok(!/Te tocó/.test(adminHtml) && !ps.some((p) => adminHtml.includes('deseo de')));
-  for (const p of db.prepare('SELECT * FROM participants').all()) {
+  for (const p of (await db.execute('SELECT * FROM participants')).rows) {
     const html = await (await fetch(`${base}/p/${p.token}`)).text();
     const g = ps.find((x) => x.id === p.giftee_id);
     assert.ok(html.includes(`deseo de ${g.email}`));

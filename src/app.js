@@ -9,17 +9,26 @@ const token = () => randomBytes(18).toString('base64url');
 const MAX = 20;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export function createApp(db = openDb(), baseUrl = process.env.BASE_URL || 'http://localhost:3000') {
+export function createApp(dbPromise = openDb(), baseUrl = process.env.BASE_URL
+  || (process.env.VERCEL_PROJECT_PRODUCTION_URL && `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`)
+  || 'http://localhost:3000') {
   const app = express();
+  Promise.resolve(dbPromise).catch(() => {}); // el error se reporta en la primera petición
   app.use(express.urlencoded({ extended: false, limit: '50kb' }));
+  let db;
+  const get = async (sql, args = []) => (await db.execute({ sql, args })).rows[0];
+  const list = async (sql, args = []) => (await db.execute({ sql, args })).rows;
+  const run = (sql, args = []) => db.execute({ sql, args });
+  app.use(async (_req, _res, next) => { try { db ??= await dbPromise; next(); } catch (e) { next(e); } });
 
   const q = {
-    event: db.prepare('SELECT * FROM events WHERE admin_token = ?'),
-    eventById: db.prepare('SELECT * FROM events WHERE id = ?'),
-    parts: db.prepare('SELECT * FROM participants WHERE event_id = ? ORDER BY id'),
-    partByToken: db.prepare('SELECT * FROM participants WHERE token = ?'),
-    partById: db.prepare('SELECT * FROM participants WHERE id = ?'),
+    event: (t) => get('SELECT * FROM events WHERE admin_token = ?', [t]),
+    eventById: (id) => get('SELECT * FROM events WHERE id = ?', [id]),
+    parts: (id) => list('SELECT * FROM participants WHERE event_id = ? ORDER BY id', [id]),
+    partByToken: (t) => get('SELECT * FROM participants WHERE token = ?', [t]),
+    partById: (id) => get('SELECT * FROM participants WHERE id = ?', [id]),
   };
+  const wrap = (fn) => (req, res, next) => fn(req, res).catch(next);
   const label = (p) => p.name || p.email;
   const parseEmails = (raw) =>
     [...new Set(String(raw).split(/[\s,;]+/).map((e) => e.trim().toLowerCase()).filter(Boolean))];
@@ -42,7 +51,7 @@ export function createApp(db = openDb(), baseUrl = process.env.BASE_URL || 'http
       <button>Crear y enviar invitaciones</button>
     </form>`)));
 
-  app.post('/events', async (req, res) => {
+  app.post('/events', wrap(async (req, res) => {
     const name = String(req.body.name || '').trim().slice(0, 100);
     const organizer = String(req.body.organizer || '').trim().toLowerCase();
     const emails = parseEmails(req.body.emails);
@@ -53,19 +62,19 @@ export function createApp(db = openDb(), baseUrl = process.env.BASE_URL || 'http
       return res.status(400).send(page('Error', `<h1>Deben ser entre 3 y ${MAX} participantes</h1>`));
 
     const adminToken = token();
-    const { lastInsertRowid } = db.prepare('INSERT INTO events (name, admin_token) VALUES (?, ?)').run(name, adminToken);
-    const ins = db.prepare('INSERT INTO participants (event_id, email, token) VALUES (?, ?, ?)');
-    for (const e of emails) ins.run(lastInsertRowid, e, token());
-    const event = q.eventById.get(lastInsertRowid);
-    await Promise.allSettled(q.parts.all(event.id).map((p) => invite(event, p)));
+    const { lastInsertRowid } = await run('INSERT INTO events (name, admin_token) VALUES (?, ?)', [name, adminToken]);
+    const eventId = Number(lastInsertRowid);
+    await db.batch(emails.map((e) => ({ sql: 'INSERT INTO participants (event_id, email, token) VALUES (?, ?, ?)', args: [eventId, e, token()] })));
+    const event = await q.eventById(eventId);
+    await Promise.allSettled((await q.parts(event.id)).map((p) => invite(event, p)));
     await sendMail(organizer, `Administra tu amigo secreto: ${name}`,
       `Panel de administración (guárdalo, no lo compartas):\n${baseUrl}/admin/${adminToken}\n`);
     res.redirect(`/admin/${adminToken}`);
-  });
+  }));
 
   // ---- Organizador: ve quién ya respondió, pero NUNCA las asignaciones ----
-  const adminView = (event, flash = '') => {
-    const ps = q.parts.all(event.id);
+  const adminView = async (event, flash = '') => {
+    const ps = await q.parts(event.id);
     const rows = ps.map((p) => `<li><span>${esc(label(p))}</span>
       <span>${p.wishes.trim() ? '<span class="ok">✔ ya escribió</span>' : '<span class="muted">pendiente</span>'}
       ${event.drawn ? '' : `<form method="post" action="/admin/${event.admin_token}/remove" style="display:inline"><input type="hidden" name="id" value="${p.id}"><button class="link">quitar</button></form>`}</span></li>`).join('');
@@ -82,57 +91,55 @@ export function createApp(db = openDb(), baseUrl = process.env.BASE_URL || 'http
       <div class="card"><ul>${rows}</ul></div>${add}${act}`);
   };
 
-  app.get('/admin/:t', (req, res) => {
-    const ev = q.event.get(req.params.t);
-    ev ? res.send(adminView(ev)) : notFound(res);
-  });
+  app.get('/admin/:t', wrap(async (req, res) => {
+    const ev = await q.event(req.params.t);
+    ev ? res.send(await adminView(ev)) : notFound(res);
+  }));
 
-  app.post('/admin/:t/add', async (req, res) => {
-    const ev = q.event.get(req.params.t);
+  app.post('/admin/:t/add', wrap(async (req, res) => {
+    const ev = await q.event(req.params.t);
     if (!ev) return notFound(res);
     const email = String(req.body.email || '').trim().toLowerCase();
-    if (ev.drawn) return res.status(409).send(adminView(ev, 'El sorteo ya se hizo.'));
-    if (!EMAIL_RE.test(email)) return res.status(400).send(adminView(ev, 'Correo inválido.'));
-    if (q.parts.all(ev.id).length >= MAX) return res.status(400).send(adminView(ev, `Máximo ${MAX}.`));
+    if (ev.drawn) return res.status(409).send(await adminView(ev, 'El sorteo ya se hizo.'));
+    if (!EMAIL_RE.test(email)) return res.status(400).send(await adminView(ev, 'Correo inválido.'));
+    if ((await q.parts(ev.id)).length >= MAX) return res.status(400).send(await adminView(ev, `Máximo ${MAX}.`));
     try {
-      db.prepare('INSERT INTO participants (event_id, email, token) VALUES (?, ?, ?)').run(ev.id, email, token());
-    } catch { return res.status(400).send(adminView(ev, 'Ese correo ya está.')); }
-    await invite(ev, db.prepare('SELECT * FROM participants WHERE event_id=? AND email=?').get(ev.id, email)).catch(() => {});
+      await run('INSERT INTO participants (event_id, email, token) VALUES (?, ?, ?)', [ev.id, email, token()]);
+    } catch { return res.status(400).send(await adminView(ev, 'Ese correo ya está.')); }
+    await invite(ev, await get('SELECT * FROM participants WHERE event_id=? AND email=?', [ev.id, email])).catch(() => {});
     res.redirect(`/admin/${ev.admin_token}`);
-  });
+  }));
 
-  app.post('/admin/:t/remove', (req, res) => {
-    const ev = q.event.get(req.params.t);
+  app.post('/admin/:t/remove', wrap(async (req, res) => {
+    const ev = await q.event(req.params.t);
     if (!ev) return notFound(res);
-    if (ev.drawn) return res.status(409).send(adminView(ev, 'El sorteo ya se hizo.'));
-    db.prepare('DELETE FROM participants WHERE id = ? AND event_id = ?').run(Number(req.body.id), ev.id);
+    if (ev.drawn) return res.status(409).send(await adminView(ev, 'El sorteo ya se hizo.'));
+    await run('DELETE FROM participants WHERE id = ? AND event_id = ?', [Number(req.body.id), ev.id]);
     res.redirect(`/admin/${ev.admin_token}`);
-  });
+  }));
 
-  app.post('/admin/:t/draw', async (req, res) => {
-    const ev = q.event.get(req.params.t);
+  app.post('/admin/:t/draw', wrap(async (req, res) => {
+    const ev = await q.event(req.params.t);
     if (!ev) return notFound(res);
-    const ps = q.parts.all(ev.id);
-    if (ev.drawn || ps.length < 3) return res.status(409).send(adminView(ev, 'No se puede sortear.'));
+    const ps = await q.parts(ev.id);
+    if (ev.drawn || ps.length < 3) return res.status(409).send(await adminView(ev, 'No se puede sortear.'));
     const pairs = draw(ps.map((p) => p.id));
-    db.exec('BEGIN');
-    try {
-      const upd = db.prepare('UPDATE participants SET giftee_id = ? WHERE id = ?');
-      for (const [giver, giftee] of pairs) upd.run(giftee, giver);
-      db.prepare('UPDATE events SET drawn = 1 WHERE id = ?').run(ev.id);
-      db.exec('COMMIT');
-    } catch (e) { db.exec('ROLLBACK'); throw e; }
+    // Todo en una transacción; "drawn = 0" evita sortear dos veces si hay doble clic.
+    await db.batch([
+      ...pairs.map(([giver, giftee]) => ({ sql: 'UPDATE participants SET giftee_id = ? WHERE id = ?', args: [giftee, giver] })),
+      { sql: 'UPDATE events SET drawn = 1 WHERE id = ? AND drawn = 0', args: [ev.id] },
+    ], 'write');
     await Promise.allSettled(ps.map((p) => sendMail(p.email, `🎁 ¡Ya salió el sorteo! ${ev.name}`,
       `Entra a tu enlace personal para ver a quién le toca regalar y sus ideas:\n${baseUrl}/p/${p.token}\n`)));
     res.redirect(`/admin/${ev.admin_token}`);
-  });
+  }));
 
   // ---- Participante ----
-  const partView = (p, flash = '') => {
-    const ev = q.eventById.get(p.event_id);
+  const partView = async (p, flash = '') => {
+    const ev = await q.eventById(p.event_id);
     let giftee = '';
     if (ev.drawn && p.giftee_id) {
-      const g = q.partById.get(p.giftee_id);
+      const g = await q.partById(p.giftee_id);
       giftee = `<div class="card"><h2>🤫 Te tocó regalarle a: ${esc(label(g))}</h2>
         <p>Sus ideas de regalo:</p>
         <div class="gift">${g.wishes.trim() ? esc(g.wishes) : '<span class="muted">Todavía no escribió nada. Vuelve a entrar más tarde.</span>'}</div></div>`;
@@ -147,18 +154,18 @@ export function createApp(db = openDb(), baseUrl = process.env.BASE_URL || 'http
         <button>Guardar</button></form>`);
   };
 
-  app.get('/p/:t', (req, res) => {
-    const p = q.partByToken.get(req.params.t);
-    p ? res.send(partView(p)) : notFound(res);
-  });
+  app.get('/p/:t', wrap(async (req, res) => {
+    const p = await q.partByToken(req.params.t);
+    p ? res.send(await partView(p)) : notFound(res);
+  }));
 
-  app.post('/p/:t', (req, res) => {
-    const p = q.partByToken.get(req.params.t);
+  app.post('/p/:t', wrap(async (req, res) => {
+    const p = await q.partByToken(req.params.t);
     if (!p) return notFound(res);
-    db.prepare('UPDATE participants SET name = ?, wishes = ? WHERE id = ?')
-      .run(String(req.body.name || '').trim().slice(0, 60), String(req.body.wishes || '').slice(0, 2000), p.id);
-    res.send(partView(q.partByToken.get(p.token), '¡Guardado! 🎁'));
-  });
+    await run('UPDATE participants SET name = ?, wishes = ? WHERE id = ?',
+      [String(req.body.name || '').trim().slice(0, 60), String(req.body.wishes || '').slice(0, 2000), p.id]);
+    res.send(await partView(await q.partByToken(p.token), '¡Guardado! 🎁'));
+  }));
 
   return app;
 }
